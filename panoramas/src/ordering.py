@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def build_connectivity_matrix(match_counts):
+def build_connectivity_matrix(matches_dict):
     """
     Cria uma matriz de conectividade a partir da quantidade
     de matches entre cada par de imagens.
@@ -17,6 +17,10 @@ def build_connectivity_matrix(match_counts):
     matrix : numpy.ndarray
         Matriz simétrica de conectividade.
     """
+
+    match_counts = {}
+    for (i, j), matches in matches_dict.items():
+        match_counts[(i, j)] = len(matches)
 
     n = 0
 

@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 
-def blend_images(image1, image2):
+def blend_images(image1, image2, alpha=0.5):
     """
     Faz uma fusão simples entre duas imagens já alinhadas.
     """
@@ -20,8 +20,8 @@ def blend_images(image1, image2):
     result[only2] = image2[only2]
 
     result[overlap] = (
-        0.5 * image1[overlap] +
-        0.5 * image2[overlap]
+        alpha * image1[overlap] +
+        (1 - alpha) * image2[overlap]
     ).astype(np.uint8)
 
     return result

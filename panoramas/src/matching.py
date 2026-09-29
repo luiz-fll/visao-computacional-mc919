@@ -1,26 +1,6 @@
 import cv2
 
 def match_descriptors(descriptors1, descriptors2, method="sift"):
-    """
-    Encontra correspondências entre os descritores de duas imagens.
-
-    Parameters
-    ----------
-    descriptors1 : numpy.ndarray
-        Descritores da primeira imagem.
-    descriptors2 : numpy.ndarray
-        Descritores da segunda imagem.
-    method : str
-        Método utilizado para calcular a distância.
-        "sift" utiliza distância L2.
-        "orb" utiliza distância Hamming.
-
-    Returns
-    -------
-    matches : list
-        Lista de matches encontrados.
-    """
-
     if method.lower() == "sift":
         norm = cv2.NORM_L2
     elif method.lower() == "orb":
@@ -39,32 +19,42 @@ def match_descriptors(descriptors1, descriptors2, method="sift"):
     return matches
 
 
-def ratio_test(matches, ratio=0.75):
-    """
-    Aplica o Lowe Ratio Test aos matches.
-
-    Parameters
-    ----------
-    matches : list
-        Matches retornados por BFMatcher.knnMatch().
-    ratio : float
-        Threshold utilizado no Lowe Ratio Test.
-
-    Returns
-    -------
-    good_matches : list
-        Matches aprovados pelo teste.
-    """
-
+def lowe_ratio_test(matches, ratio=0.75):
     good_matches = []
 
-    for match_pair in matches:
-        if len(match_pair) < 2:
+    for pair in matches:
+        if len(pair) < 2:
             continue
 
-        best_match, second_match = match_pair
+        best, second = pair
 
-        if best_match.distance < ratio * second_match.distance:
-            good_matches.append(best_match)
+        if best.distance < ratio * second.distance:
+            good_matches.append(best)
 
     return good_matches
+
+
+def match_all_images(descriptors, method="sift", ratio=0.75):
+    matches_dict = {}
+    lowe_matches_dict = {}
+
+    n = len(descriptors)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+
+            matches = match_descriptors(
+                descriptors[i],
+                descriptors[j],
+                method=method
+            )
+
+            lowe_matches = lowe_ratio_test(
+                matches,
+                ratio=ratio
+            )
+
+            matches_dict[(i, j)] = [pair[0] for pair in matches]
+            lowe_matches_dict[(i, j)] = lowe_matches
+
+    return matches_dict, lowe_matches_dict

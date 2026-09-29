@@ -1,13 +1,15 @@
-import argparse
 import cv2
 from pathlib import Path
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
 
 def resize_images(input_dir: Path, output_dir: Path, scale: float) -> None:
+    if not input_dir.is_dir():
+        raise NotADirectoryError(f"O diretório de entrada '{input_dir}' não existe.")
+
     if scale <= 0:
         raise ValueError("O fator de escala deve ser maior que 0.")
-
+    
     output_dir.mkdir(parents=True, exist_ok=True)
 
     images = [
@@ -41,42 +43,3 @@ def resize_images(input_dir: Path, output_dir: Path, scale: float) -> None:
         cv2.imwrite(str(output_path), resized)
 
         print(f"{image_path.name}: {width}x{height} -> {new_width}x{new_height}")
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Redimensiona imagens de um diretório."
-    )
-
-    parser.add_argument(
-        "--input",
-        required=True,
-        type=Path,
-        help="Diretório contendo as imagens originais.",
-    )
-
-    parser.add_argument(
-        "--output",
-        required=True,
-        type=Path,
-        help="Diretório onde as imagens redimensionadas serão salvas.",
-    )
-
-    parser.add_argument(
-        "--scale",
-        required=True,
-        type=float,
-        help="Fator de escala. Ex.: 0.5 reduz pela metade.",
-    )
-
-    args = parser.parse_args()
-
-    resize_images(
-        args.input,
-        args.output,
-        args.scale,
-    )
-
-
-if __name__ == "__main__":
-    main()
