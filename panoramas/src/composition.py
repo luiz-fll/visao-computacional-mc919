@@ -268,19 +268,107 @@ def feather_blend_panorama(images, transforms):
     return panorama, panorama_mask
 
 
+def largest_rectangle(binary):
+    """
+    Encontra o maior retângulo formado apenas por pixels 1.
+
+    Parâmetros:
+        binary: máscara 2D contendo 0 e 1.
+
+    Retorna:
+        (x, y, width, height)
+    """
+
+    rows, cols = binary.shape
+
+    heights = [0] * cols
+
+    best_area = 0
+    best_rect = (0, 0, 0, 0)
+
+    for y in range(rows):
+
+        # Atualiza a altura de cada coluna.
+        for x in range(cols):
+            if binary[y, x]:
+                heights[x] += 1
+            else:
+                heights[x] = 0
+
+        # Maior retângulo no histograma desta linha.
+        stack = []
+
+        for x in range(cols + 1):
+
+            current_height = (
+                heights[x]
+                if x < cols
+                else 0
+            )
+
+            while stack and current_height < heights[stack[-1]]:
+
+                height = heights[stack.pop()]
+
+                if stack:
+                    left = stack[-1] + 1
+                else:
+                    left = 0
+
+                width = x - left
+
+                area = width * height
+
+                if area > best_area:
+                    best_area = area
+
+                    best_rect = (
+                        left,
+                        y - height + 1,
+                        width,
+                        height
+                    )
+
+            stack.append(x)
+
+    return best_rect
+
+
 def crop_panorama(panorama, mask):
     """
-    Remove as regiões vazias ao redor do panorama.
+    Recorta o maior retângulo alinhado aos eixos
+    completamente contido na região válida do panorama.
+
+    Retorna:
+        panorama recortado
     """
 
-    points = cv2.findNonZero(mask)
+    # Converte a máscara para binária.
+    binary = (mask > 0).astype(np.uint8)
 
-    if points is None:
-        return panorama
+    # Encontra a região geral que contém o panorama.
+    x, y, w, h = cv2.boundingRect(binary)
 
-    x, y, w, h = cv2.boundingRect(points)
-
-    return panorama[
+    # Trabalha somente dentro dessa região.
+    region = binary[
         y:y + h,
         x:x + w
+    ]
+
+    # Encontra o maior retângulo completamente válido.
+    rx, ry, rw, rh = largest_rectangle(region)
+
+    if rw == 0 or rh == 0:
+        return panorama
+
+    # Converte as coordenadas da região para
+    # coordenadas do panorama original.
+    x1 = x + rx
+    y1 = y + ry
+    x2 = x1 + rw
+    y2 = y1 + rh
+
+    return panorama[
+        y1:y2,
+        x1:x2
     ]
