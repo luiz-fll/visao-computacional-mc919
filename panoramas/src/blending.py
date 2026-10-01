@@ -1,27 +1,58 @@
-import cv2
 import numpy as np
 
 
-def blend_images(image1, image2, alpha=0.5):
+def average_blending(images, masks):
     """
-    Faz uma fusão simples entre duas imagens já alinhadas.
+    Realiza blending por média das imagens.
+
+    Parameters
+    ----------
+    images : list[np.ndarray]
+        Imagens já projetadas no mesmo canvas.
+
+    masks : list[np.ndarray]
+        Máscaras booleanas indicando pixels válidos.
+
+    Returns
+    -------
+    panorama : np.ndarray
+        Panorama resultante.
     """
+    height, width = images[0].shape[:2]
 
-    mask1 = np.any(image1 > 0, axis=2)
-    mask2 = np.any(image2 > 0, axis=2)
+    panorama_sum = np.zeros((height, width, 3), dtype=np.float32)
 
-    result = np.zeros_like(image1)
+    weight_sum = np.zeros((height, width), dtype=np.float32)
 
-    only1 = mask1 & ~mask2
-    only2 = mask2 & ~mask1
-    overlap = mask1 & mask2
+    for image, mask in zip(images, masks):
+        weight = mask.astype(np.float32)
 
-    result[only1] = image1[only1]
-    result[only2] = image2[only2]
+        panorama_sum += (image.astype(np.float32) * weight[..., None])
 
-    result[overlap] = (
-        alpha * image1[overlap] +
-        (1 - alpha) * image2[overlap]
-    ).astype(np.uint8)
+        weight_sum += weight
 
-    return result
+    panorama = np.zeros_like(panorama_sum)
+
+    valid = weight_sum > 0
+
+    panorama[valid] = (panorama_sum[valid] / weight_sum[valid, None])
+
+    return np.clip(panorama, 0, 255).astype(np.uint8)
+
+def median_blending(images, masks):
+    stack = np.stack(images, axis=0).astype(np.float32)
+    mask_stack = np.stack(masks, axis=0).astype(bool)
+
+    # Repete a máscara para os 3 canais RGB/BGR.
+    mask_stack = np.repeat(mask_stack[..., None], 3, axis=-1)
+
+    # Onde a imagem não existe, usamos NaN.
+    stack[~mask_stack] = np.nan
+
+    panorama = np.nanmedian(stack, axis=0)
+
+    # Pixels onde nenhuma imagem contribuiu.
+    valid = np.any(mask_stack, axis=0)
+    panorama[~valid] = 0
+
+    return np.clip(panorama, 0, 255).astype(np.uint8)

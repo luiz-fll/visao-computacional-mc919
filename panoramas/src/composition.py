@@ -1,374 +1,337 @@
 import cv2
 import numpy as np
 
-
-def compute_global_transforms(homographies, n_images, reference):
+def build_global_homographies(order, homographies, reference_position):
     """
-    Calcula uma transformação global para cada imagem.
+    Constrói uma homografia global para cada imagem.
 
-    Assume que homographies[(i, i+1)] transforma pontos
-    da imagem i para o sistema de coordenadas da imagem i+1.
+    G[i] transforma pontos da imagem i
+    para o sistema de coordenadas da imagem de referência.
     """
+    n = len(order)
+    global_H = [None] * n
+    global_H[reference_position] = np.eye(3)
 
-    global_transforms = [None] * n_images
-    global_transforms[reference] = np.eye(3, dtype=np.float64)
+    for k in range(reference_position - 1, -1, -1):
+        H = homographies[k]
 
-    # Imagens à esquerda da referência
-    for i in range(reference - 1, -1, -1):
-        H = homographies[(i, i + 1)]
-        global_transforms[i] = global_transforms[i + 1] @ H
+        # H: order[k] -> order[k+1]
+        global_H[k] = global_H[k + 1] @ H
 
-    # Imagens à direita da referência
-    for i in range(reference + 1, n_images):
-        H = homographies[(i - 1, i)]
+    for k in range(reference_position, n - 1):
+
+        H = homographies[k]
+
+        # H: order[k] -> order[k+1]
+        # Precisamos do inverso para voltar
+        # da imagem seguinte para a referência.
         H_inv = np.linalg.inv(H)
-        global_transforms[i] = global_transforms[i - 1] @ H_inv
 
-    return global_transforms
+        global_H[k + 1] = global_H[k] @ H_inv
 
+    return global_H
 
-def get_panorama_size(images, transforms):
+def project_points(H, points):
     """
-    Calcula o tamanho do canvas final do panorama.
-
-    Retorna:
-        width
-        height
-        translation
+    Projeta uma lista de pontos de acordo com a homografia H
     """
+    points = np.asarray(points, dtype=np.float64)
 
-    corners = []
+    # Coordenadas homogêneas
+    points_h = np.hstack([
+        points,
+        np.ones((len(points), 1))
+    ])
 
-    for image, H in zip(images, transforms):
-        h, w = image.shape[:2]
+    projected_h = points_h @ H.T
 
-        image_corners = np.array([
-            [0, 0],
-            [w, 0],
-            [w, h],
-            [0, h]
-        ], dtype=np.float32).reshape(-1, 1, 2)
+    w = projected_h[:, 2]
+    projected = np.full(
+        (len(points), 2),
+        np.nan,
+        dtype=np.float64
+    )
 
-        transformed_corners = cv2.perspectiveTransform(
-            image_corners,
-            H
-        )
+    valid = np.abs(w) > 1e-10
 
-        corners.append(transformed_corners.reshape(-1, 2))
+    projected[valid] = (projected_h[valid, :2] / w[valid, None])
 
-    corners = np.vstack(corners)
+    return projected
 
-    min_x = int(np.floor(corners[:, 0].min()))
-    min_y = int(np.floor(corners[:, 1].min()))
+def get_image_corners(image):
+    """
+    Retorna os cantos de uma imagem como uma lista de pontos
+    """
+    h, w = image.shape[:2]
 
-    max_x = int(np.ceil(corners[:, 0].max()))
-    max_y = int(np.ceil(corners[:, 1].max()))
-
-    width = max_x - min_x
-    height = max_y - min_y
-
-    translation = np.array([
-        [1, 0, -min_x],
-        [0, 1, -min_y],
-        [0, 0, 1]
+    return np.array([
+        [0, 0],
+        [w - 1, 0],
+        [w - 1, h - 1],
+        [0, h - 1]
     ], dtype=np.float64)
 
-    return width, height, translation
-
-
-def compose_panorama(images, transforms):
+def to_cylindrical_coordinates(points, focal_length, cx, cy):
     """
-    Composição incremental do panorama.
-
-    Apenas uma imagem é transformada por vez.
-    Isso reduz bastante o consumo de memória.
-
-    Retorna:
-        panorama
-        panorama_mask
+    Converte uma lista de pontos para coordenadas cilíndricas
     """
+    x = points[:, 0]
+    y = points[:, 1]
 
-    width, height, translation = get_panorama_size(
-        images,
-        transforms
-    )
+    theta = np.arctan2(x - cx, focal_length)
 
-    print(f"Canvas do panorama: {width} x {height}")
+    y_cyl = ((y - cy) * focal_length / np.sqrt((x - cx) ** 2 + focal_length ** 2))
 
-    # Acumulador em float32.
-    # Possui 3 canais para RGB/BGR.
-    accumulator = np.zeros(
-        (height, width, 3),
-        dtype=np.float32
-    )
+    return theta, y_cyl
 
-    # Soma dos pesos de cada pixel.
-    weight_sum = np.zeros(
-        (height, width),
-        dtype=np.float32
-    )
-
-    for i, (image, H) in enumerate(zip(images, transforms)):
-
-        print(f"Processando imagem {i + 1}/{len(images)}...")
-
-        H_global = translation @ H
-
-        h, w = image.shape[:2]
-
-        # Máscara da região válida da imagem.
-        mask = np.ones(
-            (h, w),
-            dtype=np.uint8
-        )
-
-        # Warp da imagem atual.
-        warped = cv2.warpPerspective(
-            image,
-            H_global,
-            (width, height)
-        )
-
-        # Warp da máscara.
-        warped_mask = cv2.warpPerspective(
-            mask,
-            H_global,
-            (width, height)
-        )
-
-        valid = warped_mask > 0
-
-        # Peso uniforme.
-        accumulator[valid] += warped[valid].astype(np.float32)
-        weight_sum[valid] += 1.0
-
-        # Libera os arrays temporários antes da próxima imagem.
-        del warped
-        del warped_mask
-        del mask
-
-    valid = weight_sum > 0
-
-    panorama = np.zeros_like(
-        accumulator,
-        dtype=np.uint8
-    )
-
-    panorama[valid] = (
-        accumulator[valid] /
-        weight_sum[valid, None]
-    ).astype(np.uint8)
-
-    panorama_mask = (
-        weight_sum > 0
-    ).astype(np.uint8) * 255
-
-    del accumulator
-    del weight_sum
-
-    return panorama, panorama_mask
-
-
-def feather_blend_panorama(images, transforms):
+def cylindrical_bounds(images, order,global_homographies, focal_length):
     """
-    Composição incremental usando feather blending.
-
-    Pixels próximos ao centro de cada imagem recebem
-    peso maior do que pixels próximos às bordas.
+    Determina os limites da superfície cilíndrica
     """
+    reference_image = images[order[len(order) // 2]]
 
-    width, height, translation = get_panorama_size(
-        images,
-        transforms
-    )
+    h, w = reference_image.shape[:2]
 
-    print(f"Canvas do panorama: {width} x {height}")
+    cx = (w - 1) / 2.0
+    cy = (h - 1) / 2.0
 
-    accumulator = np.zeros(
-        (height, width, 3),
-        dtype=np.float32
-    )
+    all_theta = []
+    all_y = []
 
-    weight_sum = np.zeros(
-        (height, width),
-        dtype=np.float32
-    )
+    for position, image_index in enumerate(order):
+        image = images[image_index]
+        corners = get_image_corners(image)
+        H = global_homographies[position]
 
-    for i, (image, H) in enumerate(zip(images, transforms)):
+        # Cantos da imagem transformados
+        # para o sistema da referência.\
+        corners_reference = project_points(H, corners)
 
-        print(
-            f"Blending imagem "
-            f"{i + 1}/{len(images)}..."
-        )
+        theta, y_cyl = to_cylindrical_coordinates(corners_reference, focal_length, cx, cy)
 
-        H_global = translation @ H
+        all_theta.extend(theta)
+        all_y.extend(y_cyl)
 
-        h, w = image.shape[:2]
+    theta_min = min(all_theta)
+    theta_max = max(all_theta)
 
-        mask = np.ones(
-            (h, w),
-            dtype=np.uint8
-        )
+    y_min = min(all_y)
+    y_max = max(all_y)
 
-        warped = cv2.warpPerspective(
-            image,
-            H_global,
-            (width, height)
-        )
+    return (theta_min, theta_max, y_min, y_max)
 
-        warped_mask = cv2.warpPerspective(
-            mask,
-            H_global,
-            (width, height)
-        )
-
-        # Distância até a borda da região válida.
-        distance = cv2.distanceTransform(
-            warped_mask,
-            cv2.DIST_L2,
-            5
-        )
-
-        # Evita pesos extremamente pequenos.
-        distance += 1e-6
-
-        valid = warped_mask > 0
-
-        accumulator[valid] += (
-            warped[valid].astype(np.float32)
-            * distance[valid, None]
-        )
-
-        weight_sum[valid] += distance[valid]
-
-        del warped
-        del warped_mask
-        del mask
-        del distance
-
-    valid = weight_sum > 0
-
-    panorama = np.zeros_like(
-        accumulator,
-        dtype=np.uint8
-    )
-
-    panorama[valid] = (
-        accumulator[valid]
-        / weight_sum[valid, None]
-    ).astype(np.uint8)
-
-    panorama_mask = (
-        weight_sum > 0
-    ).astype(np.uint8) * 255
-
-    del accumulator
-    del weight_sum
-
-    return panorama, panorama_mask
-
-
-def largest_rectangle(binary):
+def cylindrical_inverse_map(canvas_width, canvas_height, theta_min, y_min, focal_length, cx, cy):
     """
-    Encontra o maior retângulo formado apenas por pixels 1.
+    Mapeamento inverso em um canvas cilíndrico.
 
-    Parâmetros:
-        binary: máscara 2D contendo 0 e 1.
+    Retorna 2 matrizes, x e y, que fornecem o mapa de posições de cada pixel do canvas em relação
+    ao sistema de coordenadas da imagem de referência.
 
-    Retorna:
-        (x, y, width, height)
+    x[i, j] = a
+    y[i, j] = b
+    canvas[i, j] = imagem[a, b]
     """
+    u = np.arange(canvas_width, dtype=np.float64)
+    v = np.arange(canvas_height,dtype=np.float64)
 
-    rows, cols = binary.shape
+    U, V = np.meshgrid(u, v)
 
-    heights = [0] * cols
+    # pixels do canvas -> coordenadas cilíndricas
+    # theta determinado pro U, y determinado por V
+    theta = (theta_min + U / focal_length)
+    y_cyl = (y_min + V)
 
-    best_area = 0
-    best_rect = (0, 0, 0, 0)
+    # Mapeamento inverso
+    x = (focal_length * np.tan(theta)) + cx
+    y = (cy + y_cyl * np.sqrt(x ** 2 + focal_length ** 2) / focal_length)
 
-    for y in range(rows):
+    return x, y
 
-        # Atualiza a altura de cada coluna.
-        for x in range(cols):
-            if binary[y, x]:
-                heights[x] += 1
-            else:
-                heights[x] = 0
+def create_image_mask(map_x, map_y, image_shape):
+    """
+    Cria uma máscara indicando quais posições
+    do canvas correspondem a pixels válidos
+    da imagem.
+    """
+    h, w = image_shape[:2]
 
-        # Maior retângulo no histograma desta linha.
-        stack = []
+    mask = (
+        np.isfinite(map_x)
+        & np.isfinite(map_y)
+        & (map_x >= 0)
+        & (map_x < w)
+        & (map_y >= 0)
+        & (map_y < h)
+    )
 
-        for x in range(cols + 1):
+    return mask
 
-            current_height = (
-                heights[x]
-                if x < cols
-                else 0
+def average_blending(image1, image2, mask1, mask2):
+    """
+    Realiza mescla das imagens através da média da intensidade dos pixels
+    """
+    weight1 = mask1.astype(np.float32)
+    weight2 = mask2.astype(np.float32)
+
+    total_weight = (weight1 + weight2)
+
+    blend = (
+        image1.astype(np.float32)
+        * weight1[..., None]
+        +
+        image2.astype(np.float32)
+        * weight2[..., None]
+    )
+
+    valid = total_weight > 0
+
+    blend[valid] /= (total_weight[valid, None])
+
+    blend = np.clip(blend, 0, 255).astype(np.uint8)
+
+    return blend
+
+def cylindrical_stitching(images, order, homographies, focal_length, scale=1.0):
+    """
+    Cria um panorama cilíndrico utilizando múltiplas imagens.
+
+    Parameters
+    ----------
+    images : list[np.ndarray]
+        Imagens na ordem original/embaralhada.
+
+    order : list[int]
+        Ordem correta das imagens.
+
+        Exemplo:
+            [4, 5, 2, 6, 7, 3]
+
+    homographies : list[np.ndarray]
+        Homografias entre imagens consecutivas de order.
+
+        homographies[0]:
+            order[0] -> order[1]
+
+        homographies[1]:
+            order[1] -> order[2]
+
+        ...
+
+    focal_length : float
+        Distância focal em pixels.
+
+    scale : float
+        Fator de escala aplicado às imagens.
+
+    reference_position : int, optional
+        Posição da imagem de referência dentro de order.
+        Se None, utiliza a imagem central.
+
+    Returns
+    -------
+    panorama : np.ndarray
+        Panorama final.
+
+    info : dict
+        Informações da composição.
+    """
+    # Redimensionamento
+    if scale != 1.0:
+
+        images = [
+            cv2.resize(
+                image,
+                None,
+                fx=scale,
+                fy=scale,
+                interpolation=cv2.INTER_AREA
             )
+            for image in images
+        ]
 
-            while stack and current_height < heights[stack[-1]]:
+    f = focal_length * scale
 
-                height = heights[stack.pop()]
+    # Referência
+    reference_position = len(order) // 2
+    reference_index = order[reference_position]
+    reference = images[reference_index]
 
-                if stack:
-                    left = stack[-1] + 1
-                else:
-                    left = 0
+    h, w = reference.shape[:2]
+    cx = (w - 1) / 2.0
+    cy = (h - 1) / 2.0
 
-                width = x - left
+    # Homografias globais
+    global_homographies = build_global_homographies(order, homographies, reference_position)
 
-                area = width * height
+    # Limites do cilindro
+    (theta_min, theta_max, y_min, y_max) = cylindrical_bounds(images, order, global_homographies, f)
 
-                if area > best_area:
-                    best_area = area
+    # Dimensões do canvas
+    canvas_width = int(np.ceil((theta_max - theta_min) * f))
+    canvas_height = int(np.ceil(y_max - y_min))
 
-                    best_rect = (
-                        left,
-                        y - height + 1,
-                        width,
-                        height
-                    )
+    print("Canvas:", canvas_width, "x", canvas_height)
 
-            stack.append(x)
+    # Mapeamento canvas -> referência
+    map_x_reference, map_y_reference = (
+        cylindrical_inverse_map(
+            canvas_width,
+            canvas_height,
+            theta_min,
+            y_min,
+            f,
+            cx,
+            cy
+        )
+    )
 
-    return best_rect
+    points_reference = np.stack([
+        map_x_reference.ravel(),
+        map_y_reference.ravel()
+    ], axis=1)
 
+    # Projetar cada imagem no canvas
+    warped_images = []
+    masks = []
+    for position, image_index in enumerate(order):
+        image = images[image_index]
+        H_global = global_homographies[position]
 
-def crop_panorama(panorama, mask):
-    """
-    Recorta o maior retângulo alinhado aos eixos
-    completamente contido na região válida do panorama.
+        print(f"Projetando imagem {image_index} (posição {position})")
 
-    Retorna:
-        panorama recortado
-    """
+        # Referência -> imagem atual
+        points_image = project_points(np.linalg.inv(H_global), points_reference)
 
-    # Converte a máscara para binária.
-    binary = (mask > 0).astype(np.uint8)
+        map_x = points_image[:, 0].reshape(canvas_height, canvas_width)
 
-    # Encontra a região geral que contém o panorama.
-    x, y, w, h = cv2.boundingRect(binary)
+        map_y = points_image[:, 1].reshape(canvas_height, canvas_width)
 
-    # Trabalha somente dentro dessa região.
-    region = binary[
-        y:y + h,
-        x:x + w
-    ]
+        # Máscara
+        mask = create_image_mask(map_x, map_y, image.shape)
 
-    # Encontra o maior retângulo completamente válido.
-    rx, ry, rw, rh = largest_rectangle(region)
+        # Remap
+        warped = cv2.remap(
+            image,
+            map_x.astype(np.float32),
+            map_y.astype(np.float32),
+            interpolation=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT
+        )
 
-    if rw == 0 or rh == 0:
-        return panorama
+        warped_images.append(warped)
+        masks.append(mask)
 
-    # Converte as coordenadas da região para
-    # coordenadas do panorama original.
-    x1 = x + rx
-    y1 = y + ry
-    x2 = x1 + rw
-    y2 = y1 + rh
+    # Informações
+    info = {
+        "reference_position": reference_position,
+        "reference_index": reference_index,
+        "global_homographies": global_homographies,
+        "theta_min_degrees": np.degrees(theta_min),
+        "theta_max_degrees": np.degrees(theta_max),
+        "y_min": y_min,
+        "y_max": y_max,
+        "canvas_width": canvas_width,
+        "canvas_height": canvas_height,
+    }
 
-    return panorama[
-        y1:y2,
-        x1:x2
-    ]
+    return warped_images, masks, info

@@ -94,3 +94,41 @@ def plot_matrix(matrix, title="Matriz", order=None):
     plt.title(title)
     plt.show()
     plt.close()
+
+def plot_iterations(image_src, image_dst, results):
+    src_rgb = cv2.cvtColor(image_src, cv2.COLOR_BGR2RGB)
+    dst_rgb = cv2.cvtColor(image_dst, cv2.COLOR_BGR2RGB)
+
+    fig, axes = plt.subplots(len(results), 3, figsize=(15, 5 * len(results)))
+
+    for row, result in enumerate(results):
+        H = result["H"]
+        height, width = image_dst.shape[:2]
+
+        # Transformar a imagem origem para o sistema da imagem destino
+        warped = cv2.warpPerspective(image_src, H, (width, height))
+        warped_rgb = cv2.cvtColor(warped, cv2.COLOR_BGR2RGB)
+
+        axes[row, 0].imshow(dst_rgb)
+        axes[row, 0].set_title(f"Destino\n {result['iterations']} iterações")
+        axes[row, 0].axis("off")
+
+        # Imagem origem deformada
+        axes[row, 1].imshow(warped_rgb)
+        axes[row, 1].set_title(f"Warp da origem\n inliers = {result["metrics"]['num_inliers']}")
+        axes[row, 1].axis("off")
+
+        # Sobreposição
+        axes[row, 2].imshow(dst_rgb)
+        axes[row, 2].imshow(warped_rgb, alpha=0.5)
+
+        axes[row, 2].set_title(
+            f"Sobreposição\n"
+            f"inlier rate = {result["metrics"]['inlier_rate']:.2%}\n"
+            f"erro médio = {result["metrics"]['mean_reprojection_error']:.2f} px"
+        )
+
+        axes[row, 2].axis("off")
+
+    plt.tight_layout()
+    plt.show()
