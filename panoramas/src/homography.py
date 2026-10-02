@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.optimize import least_squares
 
 def estimate_affine(src_pts, dst_pts):
     """
