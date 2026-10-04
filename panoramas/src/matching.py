@@ -1,8 +1,33 @@
+"""
+Matching de descritores entre pares de imagens.
+
+Inclui:
+- Matching KNN (k=2)
+- Teste de razão de Lowe
+- Filtragem de matches mútuos (cross-check)
+"""
 import cv2
 import numpy as np
 
 def match_descriptors(descriptors1, descriptors2, method="sift"):
-    """Faz matching direcional usando KNN (k=2)."""
+    """
+    Realiza matching direcional usando KNN com k=2.
+
+    Parameters
+    ----------
+    descriptors1 : np.ndarray
+        Descritores da imagem de origem.
+    descriptors2 : np.ndarray
+        Descritores da imagem de destino.
+    method : str
+        "sift" (L2) ou "orb" (Hamming).
+
+    Returns
+    -------
+    list
+        Lista de listas de cv2.DMatch (até 2 vizinhos por descritor).
+        Retorna lista vazia se algum dos descritores for None.
+    """
     if descriptors1 is None or descriptors2 is None:
         return []
 
@@ -11,71 +36,87 @@ def match_descriptors(descriptors1, descriptors2, method="sift"):
     elif method.lower() == "orb":
         norm = cv2.NORM_HAMMING
     else:
-        raise ValueError("Método deve ser 'sift' ou 'orb'.")
+        raise ValueError("method deve ser 'sift' ou 'orb'")
 
     matcher = cv2.BFMatcher(norm)
-
-    return matcher.knnMatch(
-        descriptors1,
-        descriptors2,
-        k=2
-    )
+    return matcher.knnMatch(descriptors1, descriptors2, k=2)
 
 
 def lowe_ratio_test(matches, ratio=0.75):
-    """Aplica o teste de razão de Lowe."""
-    lowe_matches = []
+    """
+    Aplica o teste de razão de Lowe.
 
+    Mantém apenas matches em que a distância do melhor vizinho
+    é significativamente menor que a do segundo melhor.
+
+    Parameters
+    ----------
+    matches : list
+        Resultado de knnMatch (lista de listas de DMatch).
+    ratio : float
+        Limiar de razão (tipicamente 0.7 ~ 0.8).
+
+    Returns
+    -------
+    list[cv2.DMatch]
+        Matches que passaram no teste.
+    """
+    good_matches = []
     for pair in matches:
         if len(pair) < 2:
             continue
-
         best, second = pair
-
         if best.distance < ratio * second.distance:
-            lowe_matches.append(best)
-
-    return lowe_matches
+            good_matches.append(best)
+    return good_matches
 
 
 def mutual_matches(matches_12, matches_21):
     """
-    Mantém somente correspondências que são consistentes nos dois sentidos.
+    Mantém apenas correspondências consistentes nos dois sentidos (cross-check).
 
-    matches_12: matches de imagem 1 -> imagem 2.
-    matches_21: matches de imagem 2 -> imagem 1.
+    Parameters
+    ----------
+    matches_12 : list[cv2.DMatch]
+        Matches da imagem 1 → 2.
+    matches_21 : list[cv2.DMatch]
+        Matches da imagem 2 → 1.
 
-    O retorno está na direção 1 -> 2.
+    Returns
+    -------
+    list[cv2.DMatch]
+        Matches mútuos na direção 1 → 2.
     """
-    reverse_pairs = {
-        (match.trainIdx, match.queryIdx)
-        for match in matches_21
-    }
-
+    reverse_pairs = {(m.trainIdx, m.queryIdx) for m in matches_21}
     return [
-        match
-        for match in matches_12
-        if (match.queryIdx, match.trainIdx) in reverse_pairs
+        m for m in matches_12
+        if (m.queryIdx, m.trainIdx) in reverse_pairs
     ]
 
 
 def match_all_images(descriptors, method="sift", ratio=0.75):
     """
-    Faz matching bilateral entre todos os pares de imagens.
+    Realiza matching bilateral entre todos os pares de imagens.
 
-    Retorna duas matrizes NxN de dtype=object:
+    Parameters
+    ----------
+    descriptors : list[np.ndarray]
+        Lista de descritores de cada imagem.
+    method : str
+        "sift" ou "orb".
+    ratio : float
+        Limiar do teste de Lowe.
 
-        matches_matrix[i, j]
-            matches KNN de i -> j.
-
-        lowe_matrix[i, j]
-            matches que passaram no Lowe e também são mútuos.
-
-    A diagonal fica vazia.
-    As duas metades da matriz preservam a direção dos matches.
+    Returns
+    -------
+    matches_matrix : np.ndarray (dtype=object)
+        Matriz N×N. matches_matrix[i, j] contém os matches brutos (melhor vizinho)
+        da imagem i → j. Diagonal vazia.
+    lowe_matrix : np.ndarray (dtype=object)
+        Matriz N×N. lowe_matrix[i, j] contém os matches que passaram no
+        teste de Lowe **e** são mútuos. Diagonal vazia.
     """
     n = len(descriptors)
-
     matches_matrix = np.empty((n, n), dtype=object)
     lowe_matrix = np.empty((n, n), dtype=object)
 
@@ -86,34 +127,21 @@ def match_all_images(descriptors, method="sift", ratio=0.75):
 
     for i in range(n):
         for j in range(i + 1, n):
-            # Matching nos dois sentidos.
-            matches_ij = match_descriptors(
-                descriptors[i],
-                descriptors[j],
-                method=method
-            )
-            matches_ji = match_descriptors(
-                descriptors[j],
-                descriptors[i],
-                method=method
-            )
+            # Matching nos dois sentidos
+            matches_ij = match_descriptors(descriptors[i], descriptors[j], method=method)
+            matches_ji = match_descriptors(descriptors[j], descriptors[i], method=method)
 
-            # Lowe nos dois sentidos.
-            lowe_ij = lowe_ratio_test(
-                matches_ij,
-                ratio=ratio
-            )
-            lowe_ji = lowe_ratio_test(
-                matches_ji,
-                ratio=ratio
-            )
+            # Teste de Lowe nos dois sentidos
+            lowe_ij = lowe_ratio_test(matches_ij, ratio=ratio)
+            lowe_ji = lowe_ratio_test(matches_ji, ratio=ratio)
 
-            # Mantém somente matches que aparecem nos dois sentidos.
+            # Cross-check
             mutual_ij = mutual_matches(lowe_ij, lowe_ji)
             mutual_ji = mutual_matches(lowe_ji, lowe_ij)
 
-            matches_matrix[i, j] = [neighbor[0] for neighbor in matches_ij]
-            matches_matrix[j, i] = [neighbor[0] for neighbor in matches_ji]
+            # Guarda o melhor vizinho bruto (para eventual visualização)
+            matches_matrix[i, j] = [pair[0] for pair in matches_ij if len(pair) > 0]
+            matches_matrix[j, i] = [pair[0] for pair in matches_ji if len(pair) > 0]
 
             lowe_matrix[i, j] = mutual_ij
             lowe_matrix[j, i] = mutual_ji

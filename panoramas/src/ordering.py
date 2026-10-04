@@ -1,277 +1,209 @@
+"""
+Ordenação das imagens e detecção de outliers com base na matriz de conectividade.
+
+A força de conexão entre duas imagens é definida pelo número de matches mútuos
+após o teste de Lowe.
+"""
 import numpy as np
 
-def lowe_to_count_matrix(lowe_matrix):
-    """
-    Converte uma matriz de listas de DMatch em uma matriz simétrica
-    contendo a quantidade de matches bilaterais de cada par.
-    """
-    n = lowe_matrix.shape[0]
-    counts = np.zeros((n, n), dtype=int)
 
+def compute_image_statistics(connectivity_matrix):
+    """
+    Calcula estatísticas de conectividade para cada imagem.
+
+    O score bilateral de uma aresta (i, j) é:
+        W[i, j] / sqrt(median_i * median_j)
+
+    onde median_i é a mediana das conexões da imagem i (excluindo a diagonal).
+
+    Parameters
+    ----------
+    connectivity_matrix : np.ndarray
+        Matriz simétrica N×N com a força das conexões (número de matches).
+
+    Returns
+    -------
+    dict
+        Contém:
+            - total_strength
+            - median_strength
+            - max_strength
+            - relative_strength (max / mediana)
+            - bilateral_scores (matriz)
+            - bilateral_mean
+            - bilateral_max
+    """
+    n = len(connectivity_matrix)
+
+    total_strength = np.sum(connectivity_matrix, axis=1)
+
+    median_strength = np.zeros(n)
+    for i in range(n):
+        values = np.delete(connectivity_matrix[i], i)
+        median_strength[i] = np.median(values)
+
+    max_strength = np.max(connectivity_matrix, axis=1)
+
+    relative_strength = np.zeros(n)
+    valid = median_strength > 0
+    relative_strength[valid] = max_strength[valid] / median_strength[valid]
+
+    # Matriz de scores bilaterais
+    bilateral_scores = np.zeros_like(connectivity_matrix, dtype=np.float32)
     for i in range(n):
         for j in range(i + 1, n):
-            count_ij = len(lowe_matrix[i, j])
-            count_ji = len(lowe_matrix[j, i])
+            denom = np.sqrt(median_strength[i] * median_strength[j])
+            score = connectivity_matrix[i, j] / denom if denom > 0 else 0.0
+            bilateral_scores[i, j] = score
+            bilateral_scores[j, i] = score
 
-            # Em princípio devem ser iguais. Usamos o menor valor para
-            # evitar assimetrias acidentais na estrutura recebida.
-            count = min(count_ij, count_ji)
-
-            counts[i, j] = count
-            counts[j, i] = count
-
-    return counts
-
-
-def normalize_connectivity(counts):
-    """
-    Normaliza a conectividade em relação à melhor conexão de cada imagem.
-
-    Para cada imagem i:
-
-        relative[i,j] = counts[i,j] / max_j(counts[i,j])
-
-    Como a normalização por linha não é simétrica, combinamos as duas
-    direções pela média:
-
-        C[i,j] = 0.5 * (relative[i,j] + relative[j,i])
-
-    Assim, C fica entre 0 e 1 e C[i,j] == C[j,i].
-    """
-    counts = np.asarray(counts, dtype=float)
-    n = counts.shape[0]
-
-    if counts.ndim != 2 or counts.shape[0] != counts.shape[1]:
-        raise ValueError("A matriz de conectividade deve ser quadrada.")
-
-    best = counts.max(axis=1)
-
-    relative = np.zeros_like(counts, dtype=float)
-
+    bilateral_mean = np.zeros(n)
+    bilateral_max = np.zeros(n)
     for i in range(n):
-        if best[i] > 0:
-            relative[i] = counts[i] / best[i]
+        values = np.delete(bilateral_scores[i], i)
+        bilateral_mean[i] = np.mean(values)
+        bilateral_max[i] = np.max(values)
 
-    connectivity = 0.5 * (relative + relative.T)
-    np.fill_diagonal(connectivity, 0.0)
+    return {
+        "total_strength": total_strength,
+        "median_strength": median_strength,
+        "max_strength": max_strength,
+        "relative_strength": relative_strength,
+        "bilateral_scores": bilateral_scores,
+        "bilateral_mean": bilateral_mean,
+        "bilateral_max": bilateral_max,
+    }
 
-    return connectivity, best
 
-
-def detect_intruders(counts, intruder_ratio=0.25):
+def detect_outliers(connectivity_matrix, threshold=0.5):
     """
-    Detecta imagens cuja melhor conexão é muito fraca em relação
-    à força típica das imagens do conjunto.
+    Detecta imagens candidatas a outliers com base no score bilateral médio.
 
-    A força de uma imagem é seu maior número de matches bilaterais.
-    Normalizamos essa força pela mediana das forças do conjunto.
+    Uma imagem é considerada outlier quando:
+        bilateral_mean < threshold
 
-    Retorna:
-        valid_mask: True para imagens mantidas.
-        strength: força normalizada de cada imagem.
+    Parameters
+    ----------
+    connectivity_matrix : np.ndarray
+        Matriz de conectividade.
+    threshold : float
+        Limiar do score bilateral médio. Valores menores são mais permissivos.
+
+    Returns
+    -------
+    list[int]
+        Índices das imagens consideradas outliers.
     """
-    counts = np.asarray(counts, dtype=float)
-    best = counts.max(axis=1)
-
-    positive = best[best > 0]
-
-    if len(positive) == 0:
-        return np.zeros(len(best), dtype=bool), np.zeros(len(best))
-
-    reference = np.median(positive)
-    strength = best / reference
-
-    valid_mask = strength >= intruder_ratio
-
-    return valid_mask, strength
+    statistics = compute_image_statistics(connectivity_matrix)
+    scores = statistics["bilateral_mean"]
+    return [i for i, score in enumerate(scores) if score < threshold]
 
 
-def maximum_spanning_tree(connectivity, valid_mask=None):
+def maximum_weight_hamiltonian_path(connectivity_matrix):
     """
-    Calcula uma árvore geradora máxima usando Kruskal.
+    Encontra o caminho Hamiltoniano de peso máximo (cada imagem aparece exatamente uma vez).
 
-    Retorna uma lista de arestas:
-        [(i, j, peso), ...]
+    O peso de uma transição i → j é W[i, j].
+    Utiliza programação dinâmica no estilo Held-Karp.
 
-    Somente imagens válidas participam da árvore.
+    Complexidade: O(n² · 2ⁿ) — viável para os datasets pequenos típicos desta atividade.
+
+    Parameters
+    ----------
+    connectivity_matrix : np.ndarray
+        Matriz simétrica de pesos.
+
+    Returns
+    -------
+    path : list[int]
+        Ordem das imagens que maximiza a soma dos pesos das arestas.
     """
-    connectivity = np.asarray(connectivity, dtype=float)
-    n = connectivity.shape[0]
+    n = len(connectivity_matrix)
+    n_masks = 1 << n
 
-    if valid_mask is None:
-        valid_mask = np.ones(n, dtype=bool)
-    else:
-        valid_mask = np.asarray(valid_mask, dtype=bool)
+    # dp[mask, j] = melhor score de um caminho que visita exatamente o conjunto 'mask'
+    # e termina na imagem j.
+    dp = np.full((n_masks, n), -np.inf)
+    parent = np.full((n_masks, n), -1, dtype=int)
 
-    parent = np.arange(n)
-    rank = np.zeros(n, dtype=int)
+    # Caminhos de uma única imagem têm score zero
+    for j in range(n):
+        dp[1 << j, j] = 0.0
 
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a, b):
-        root_a = find(a)
-        root_b = find(b)
-
-        if root_a == root_b:
-            return False
-
-        if rank[root_a] < rank[root_b]:
-            root_a, root_b = root_b, root_a
-
-        parent[root_b] = root_a
-
-        if rank[root_a] == rank[root_b]:
-            rank[root_a] += 1
-
-        return True
-
-    edges = []
-
-    for i in range(n):
-        if not valid_mask[i]:
-            continue
-
-        for j in range(i + 1, n):
-            if not valid_mask[j]:
+    for mask in range(n_masks):
+        for j in range(n):
+            if not (mask & (1 << j)):
                 continue
 
-            weight = connectivity[i, j]
+            previous_mask = mask ^ (1 << j)
+            if previous_mask == 0:
+                continue
 
-            if weight > 0:
-                edges.append((weight, i, j))
+            best_score = -np.inf
+            best_prev = -1
 
-    # Maior peso primeiro.
-    edges.sort(reverse=True)
+            for k in range(n):
+                if not (previous_mask & (1 << k)):
+                    continue
+                candidate = dp[previous_mask, k] + connectivity_matrix[k, j]
+                if candidate > best_score:
+                    best_score = candidate
+                    best_prev = k
 
-    tree = []
+            dp[mask, j] = best_score
+            parent[mask, j] = best_prev
 
-    for weight, i, j in edges:
-        if union(i, j):
-            tree.append((i, j, weight))
+    full_mask = n_masks - 1
+    end = int(np.argmax(dp[full_mask]))
 
-    return tree
+    # Reconstrução do caminho
+    path = []
+    mask = full_mask
+    current = end
+    while current != -1:
+        path.append(current)
+        previous = parent[mask, current]
+        mask ^= 1 << current
+        current = previous
+
+    path.reverse()
+    return path
 
 
-def order_from_tree(tree, valid_mask):
+def infer_order(matches_matrix, outlier_threshold=0.5):
     """
-    Extrai a ordem de uma árvore que representa uma cadeia.
+    Detecta outliers e ordena as imagens restantes pelo caminho Hamiltoniano de peso máximo.
 
-    Para um panorama linear, a árvore esperada tem exatamente dois
-    vértices de grau 1 e todos os outros de grau 2.
+    Parameters
+    ----------
+    matches_matrix : np.ndarray (dtype=object)
+        Matriz de matches (normalmente a lowe_matrix). A força de conexão é o
+        comprimento da lista de matches.
+    outlier_threshold : float
+        Limiar do score bilateral médio para detecção de outliers.
 
-    Se a árvore tiver ramificações, a função gera erro em vez de
-    inventar uma ordem que não esteja representada pelo grafo.
+    Returns
+    -------
+    order : list[int]
+        Ordem das imagens (apenas inliers).
+    connectivity_matrix : np.ndarray
+        Matriz de conectividade completa (número de matches).
+    filtered_matrix : np.ndarray
+        Submatriz de conectividade apenas com os inliers.
     """
-    valid_nodes = np.flatnonzero(valid_mask).tolist()
+    connectivity_matrix = np.vectorize(len)(matches_matrix)
+    outliers = detect_outliers(connectivity_matrix, threshold=outlier_threshold)
 
-    if not valid_nodes:
-        return []
+    inliers = [i for i in range(len(connectivity_matrix)) if i not in outliers]
 
-    if len(valid_nodes) == 1:
-        return valid_nodes
+    if len(inliers) == 0:
+        raise ValueError("O detector classificou todas as imagens como outliers.")
+    if len(inliers) == 1:
+        return inliers, connectivity_matrix, connectivity_matrix[np.ix_(inliers, inliers)]
 
-    graph = {node: [] for node in valid_nodes}
+    filtered_matrix = connectivity_matrix[np.ix_(inliers, inliers)]
+    local_order = maximum_weight_hamiltonian_path(filtered_matrix)
 
-    for i, j, weight in tree:
-        graph[i].append((j, weight))
-        graph[j].append((i, weight))
-
-    degrees = {node: len(neighbors) for node, neighbors in graph.items()}
-
-    if any(degree > 2 for degree in degrees.values()):
-        raise ValueError(
-            "A MST possui ramificações; ela não representa uma cadeia linear."
-        )
-
-    endpoints = [
-        node for node, degree in degrees.items()
-        if degree == 1
-    ]
-
-    if len(endpoints) != 2:
-        raise ValueError(
-            "A MST não possui exatamente duas extremidades."
-        )
-
-    start = endpoints[0]
-    order = [start]
-    previous = None
-    current = start
-
-    while True:
-        candidates = [
-            node
-            for node, _ in graph[current]
-            if node != previous
-        ]
-
-        if not candidates:
-            break
-
-        next_node = candidates[0]
-        order.append(next_node)
-        previous, current = current, next_node
-
-    if len(order) != len(valid_nodes):
-        raise ValueError(
-            "Não foi possível percorrer todas as imagens da MST."
-        )
-
-    return order
-
-
-def infer_order(lowe_matrix, intruder_ratio=0.25):
-    """
-    Pipeline completo de ordenação:
-
-        Lowe bilateral
-            ↓
-        contagem de matches
-            ↓
-        normalização da conectividade
-            ↓
-        rejeição de intrusas
-            ↓
-        MST
-            ↓
-        ordenação da cadeia
-
-    Retorna:
-        order
-        counts
-        connectivity
-        valid_mask
-        strength
-        tree
-    """
-    counts = lowe_to_count_matrix(lowe_matrix)
-
-    connectivity, _ = normalize_connectivity(counts)
-
-    valid_mask, strength = detect_intruders(
-        counts,
-        intruder_ratio=intruder_ratio
-    )
-
-    tree = maximum_spanning_tree(
-        connectivity,
-        valid_mask=valid_mask
-    )
-
-    order = order_from_tree(
-        tree,
-        valid_mask
-    )
-
-    return (
-        order,
-        counts,
-        connectivity,
-        valid_mask,
-        strength,
-        tree,
-    )
+    # Converte índices locais de volta para os índices originais
+    order = [inliers[i] for i in local_order]
+    return order, connectivity_matrix, filtered_matrix

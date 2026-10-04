@@ -78,12 +78,9 @@ def plot_matrix(matrix, title="Matriz", order=None):
             range(len(order)),
             order
         )
-        final_matrix = matrix[np.ix_(order, order)]
-    else:
-        final_matrix = matrix
 
     plt.imshow(
-        final_matrix,
+        matrix,
         cmap="viridis"
     )
 
