@@ -7,8 +7,10 @@ Passos principais:
 3. Mapeamento inverso (canvas → sistema da imagem de referência → cada imagem).
 4. Remapeamento (warping) de todas as imagens para o canvas comum.
 """
+
 import cv2
 import numpy as np
+
 
 def build_global_homographies(order, homographies, reference_position):
     """
@@ -186,7 +188,7 @@ def create_image_mask(map_x, map_y, image_shape):
     )
 
 
-def cylindrical_stitching(images, order, homographies, focal_length):
+def cylindrical_stitching(images, order, homographies, focal_length, verbose=True):
     """
     Cria um panorama cilíndrico a partir de múltiplas imagens.
 
@@ -200,6 +202,8 @@ def cylindrical_stitching(images, order, homographies, focal_length):
         Homografias consecutivas: homographies[k] leva order[k] → order[k+1].
     focal_length : float
         Distância focal em pixels.
+    verbose : bool
+        Se True, imprime o progresso da projeção.
 
     Returns
     -------
@@ -229,7 +233,10 @@ def cylindrical_stitching(images, order, homographies, focal_length):
     # Dimensões do canvas
     canvas_width  = int(np.ceil((theta_max - theta_min) * focal_length))
     canvas_height = int(np.ceil(y_max - y_min))
-    print(f"Canvas: {canvas_width} × {canvas_height}")
+
+    if verbose:
+        print(f"[Composition] Canvas: {canvas_width} × {canvas_height}")
+        print(f"[Composition] Referência: imagem {reference_index} (posição {reference_position})")
 
     # Mapeamento canvas → sistema da referência
     map_x_ref, map_y_ref = cylindrical_inverse_map(
@@ -247,7 +254,9 @@ def cylindrical_stitching(images, order, homographies, focal_length):
     for position, image_index in enumerate(order):
         image = images[image_index]
         H_global = global_homographies[position]
-        print(f"Projetando imagem {image_index} (posição {position})")
+
+        if verbose:
+            print(f"[Composition] Projetando imagem {image_index} (posição {position})")
 
         # Referência → imagem atual
         points_img = project_points(np.linalg.inv(H_global), points_ref)

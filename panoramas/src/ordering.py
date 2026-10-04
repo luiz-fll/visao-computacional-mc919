@@ -4,6 +4,7 @@ Ordenação das imagens e detecção de outliers com base na matriz de conectivi
 A força de conexão entre duas imagens é definida pelo número de matches mútuos
 após o teste de Lowe.
 """
+
 import numpy as np
 
 

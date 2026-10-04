@@ -6,10 +6,12 @@ Inclui:
 - Optimal seam + feathering local (para pares de imagens)
 - Blending sequencial de múltiplas imagens
 """
+
 import cv2
 import numpy as np
 
-def feather_blending(images, masks):
+
+def feather_blending(images, masks, verbose=True):
     """
     Feather blending multi-imagem.
 
@@ -23,6 +25,8 @@ def feather_blending(images, masks):
         Imagens já alinhadas (mesmo tamanho).
     masks : list[np.ndarray]
         Máscaras booleanas ou binárias correspondentes.
+    verbose : bool
+        Se True, imprime o progresso.
 
     Returns
     -------
@@ -30,10 +34,16 @@ def feather_blending(images, masks):
     """
     height, width = images[0].shape[:2]
 
+    if verbose:
+        print(f"[Blending] Feather blending com {len(images)} imagens")
+
     panorama_sum = np.zeros((height, width, 3), dtype=np.float32)
     weight_sum   = np.zeros((height, width),    dtype=np.float32)
 
-    for image, mask in zip(images, masks):
+    for idx, (image, mask) in enumerate(zip(images, masks)):
+        if verbose:
+            print(f"[Blending]   Processando imagem {idx}")
+
         mask_binary = (mask > 0).astype(np.uint8)
 
         # Distância de cada pixel até a borda da região válida
@@ -216,7 +226,7 @@ def optimal_seam_pair(image1, image2, mask1, mask2, feather_width=30):
     return result
 
 
-def optimal_seam_blending(images, masks, feather_width=30):
+def optimal_seam_blending(images, masks, feather_width=30, verbose=True):
     """
     Blending sequencial de múltiplas imagens usando optimal seam + feathering.
 
@@ -233,6 +243,8 @@ def optimal_seam_blending(images, masks, feather_width=30):
         Máscaras correspondentes.
     feather_width : int
         Largura da transição suave.
+    verbose : bool
+        Se True, imprime o progresso de cada combinação.
 
     Returns
     -------
@@ -250,11 +262,16 @@ def optimal_seam_blending(images, masks, feather_width=30):
         if mask.shape[:2] != shape[:2]:
             raise ValueError("Todas as máscaras precisam ter o mesmo tamanho.")
 
+    if verbose:
+        print(f"[Blending] Optimal seam com {len(images)} imagens (feather={feather_width})")
+
     panorama = images[0].copy()
     panorama_mask = masks[0] > 0
 
     for i in range(1, len(images)):
-        print(f"Blending: imagem {i} + panorama")
+        if verbose:
+            print(f"[Blending]   Combinando panorama ← imagem {i}")
+
         panorama = optimal_seam_pair(
             panorama, images[i],
             panorama_mask, masks[i],

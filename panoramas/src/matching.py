@@ -6,8 +6,10 @@ Inclui:
 - Teste de razão de Lowe
 - Filtragem de matches mútuos (cross-check)
 """
+
 import cv2
 import numpy as np
+
 
 def match_descriptors(descriptors1, descriptors2, method="sift"):
     """

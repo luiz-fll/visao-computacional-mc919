@@ -1,10 +1,12 @@
 """
 Utilitário simples para redimensionar um diretório de imagens.
 """
+
 from pathlib import Path
 import cv2
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff"}
+
 
 def resize_images(input_dir: Path, output_dir: Path, scale: float) -> None:
     """
@@ -32,13 +34,13 @@ def resize_images(input_dir: Path, output_dir: Path, scale: float) -> None:
     ]
 
     if not images:
-        print(f"Nenhuma imagem encontrada em: {input_dir}")
+        print(f"[Resize] Nenhuma imagem encontrada em: {input_dir}")
         return
 
     for image_path in sorted(images):
         image = cv2.imread(str(image_path))
         if image is None:
-            print(f"Não foi possível ler: {image_path}")
+            print(f"[Resize] Não foi possível ler: {image_path}")
             continue
 
         height, width = image.shape[:2]
@@ -53,4 +55,4 @@ def resize_images(input_dir: Path, output_dir: Path, scale: float) -> None:
 
         output_path = output_dir / image_path.name
         cv2.imwrite(str(output_path), resized)
-        print(f"{image_path.name}: {width}×{height} → {new_width}×{new_height}")
+        print(f"[Resize] {image_path.name}: {width}×{height} → {new_width}×{new_height}")

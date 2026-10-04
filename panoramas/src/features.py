@@ -3,7 +3,9 @@ Detecção de pontos de interesse e descritores.
 
 Suporta SIFT (mais preciso, mais lento) e ORB (mais rápido, binário).
 """
+
 import cv2
+
 
 def detect_sift(image):
     """
@@ -74,13 +76,13 @@ def draw_keypoints(images, method="sift"):
         raise ValueError("method deve ser 'sift' ou 'orb'")
 
     results = []
-    print(f"Detector: {method}")
+    print(f"[Features] Detector: {method.upper()}")
 
-    for image in images:
+    for i, image in enumerate(images):
         keypoints, descriptors = detector(image)
-        print(f"  Número de keypoints: {len(keypoints)}")
-        if descriptors is not None:
-            print(f"  Formato dos descritores: {descriptors.shape}")
+        n_kpts = len(keypoints) if keypoints is not None else 0
+        shape_str = str(descriptors.shape) if descriptors is not None else "None"
+        print(f"[Features]   Imagem {i}: {n_kpts} keypoints, descritores {shape_str}")
 
         image_with_keypoints = cv2.drawKeypoints(
             image,

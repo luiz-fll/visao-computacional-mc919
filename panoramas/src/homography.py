@@ -7,8 +7,10 @@ Fluxo principal:
 3. RANSAC para robustez a outliers.
 4. Estimativa de todas as homografias consecutivas na ordem determinada.
 """
+
 import numpy as np
 from scipy.optimize import least_squares
+
 
 def estimate_affine(src_pts, dst_pts):
     """
@@ -240,7 +242,8 @@ def ransac_homography(src_pts, dst_pts, num_iterations=1000, threshold=3.0):
 
 
 def estimate_all_homographies(lowe_matrix, keypoints, order,
-                              num_iterations=1000, threshold=3.0):
+                              num_iterations=1000, threshold=3.0,
+                              verbose=True):
     """
     Estima as homografias entre todos os pares vizinhos na ordem dada.
 
@@ -256,6 +259,8 @@ def estimate_all_homographies(lowe_matrix, keypoints, order,
         Iterações do RANSAC.
     threshold : float
         Limiar de inlier do RANSAC (pixels).
+    verbose : bool
+        Se True, imprime o progresso de cada par.
 
     Returns
     -------
@@ -270,7 +275,9 @@ def estimate_all_homographies(lowe_matrix, keypoints, order,
     for pos in range(len(order) - 1):
         i = order[pos]
         j = order[pos + 1]
-        print(f"Processando: imagem {i} → imagem {j}")
+
+        if verbose:
+            print(f"[Homography] Estimando {i} → {j}")
 
         matches = lowe_matrix[i][j]
         if len(matches) < 4:
@@ -289,6 +296,13 @@ def estimate_all_homographies(lowe_matrix, keypoints, order,
         num_inliers = int(np.sum(inliers))
         inlier_rate = num_inliers / num_matches
         mean_error = float(errors[inliers].mean()) if num_inliers > 0 else np.inf
+
+        if verbose:
+            print(
+                f"[Homography]   {i} → {j}: "
+                f"{num_inliers}/{num_matches} inliers ({inlier_rate:.1%}), "
+                f"erro médio = {mean_error:.2f} px"
+            )
 
         homographies.append(H)
         metrics.append({
