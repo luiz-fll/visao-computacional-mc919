@@ -81,6 +81,17 @@ def plot_matrix(matrix, title="Matriz", order=None):
         plt.xticks(range(len(order)), order)
         plt.yticks(range(len(order)), order)
 
+    for i in range(matrix.shape[0]):
+        for j in range(matrix.shape[1]):
+            plt.text(
+                j,
+                i,
+                str(matrix[i, j]),
+                ha="center",
+                va="center",
+                color="white"
+            )
+
     plt.xlabel("Imagem")
     plt.ylabel("Imagem")
     plt.title(title)

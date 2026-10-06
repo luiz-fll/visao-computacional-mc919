@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple, Dict, Any
 import numpy as np
+import random
 import cv2
 
 from src.features import detect_sift, detect_orb
@@ -155,7 +156,7 @@ def create_panorama(
     if verbose:
         print(f"[Ordering] Ordenando imagens (outlier_threshold={outlier_threshold})")
 
-    order, connectivity_matrix, filtered_matrix = infer_order(
+    order, connectivity_matrix, filtered_matrix, statistics = infer_order(
         lowe_matrix,
         outlier_threshold=outlier_threshold,
     )
@@ -266,8 +267,8 @@ if __name__ == "__main__":
     parser.add_argument("--method", choices=["sift", "orb"], default="sift", help="Detector de features")
     parser.add_argument("--blending", choices=["optimal_seam", "feather"], default="optimal_seam")
     parser.add_argument("--feather-width", type=int, default=30)
-    parser.add_argument("--lowe-ratio", type=float, default=0.75)
-    parser.add_argument("--outlier-threshold", type=float, default=0.5)
+    parser.add_argument("--lowe-ratio", type=float, default=0.8)
+    parser.add_argument("--outlier-threshold", type=float, default=0.3)
     parser.add_argument("--ransac-iterations", type=int, default=1000)
     parser.add_argument("--ransac-threshold", type=float, default=3.0)
     parser.add_argument("--quiet", action="store_true", help="Não imprime progresso")
@@ -289,6 +290,10 @@ if __name__ == "__main__":
     for p, img in zip(paths, images):
         if img is None:
             raise SystemExit(f"[Panorama] Falha ao ler {p}")
+
+    random.seed(2026)
+    np.random.seed(2026)
+    random.shuffle(images)
 
     panorama, info = create_panorama(
         images,

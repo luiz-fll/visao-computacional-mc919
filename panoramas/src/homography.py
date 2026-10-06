@@ -184,7 +184,7 @@ def compute_reprojection_errors(H, src_pts, dst_pts):
     return errors
 
 
-def ransac_homography(src_pts, dst_pts, num_iterations=1000, threshold=3.0):
+def ransac_homography(src_pts, dst_pts, num_iterations=100, threshold=3.0):
     """
     Estima uma homografia robusta usando RANSAC.
 
