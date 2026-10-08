@@ -24,6 +24,7 @@ from src.ordering import infer_order
 from src.homography import estimate_all_homographies
 from src.composition import cylindrical_stitching
 from src.blending import optimal_seam_blending, feather_blending
+from src.correction import crop_panorama
 
 
 def create_panorama(
@@ -46,6 +47,8 @@ def create_panorama(
     # ---- Controle ----
     return_intermediate: bool = False,
     verbose: bool = True,
+    corrected: bool = False,
+    crop: bool = False,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
     Cria um panorama a partir de uma lista de imagens (do início ao fim).
@@ -200,6 +203,7 @@ def create_panorama(
         homographies,
         focal_length=focal_length,
         verbose=verbose,
+        corrected=corrected,
     )
 
     # ------------------------------------------------------------------
@@ -250,7 +254,10 @@ def create_panorama(
             "masks": masks,
         })
 
-    return panorama, info
+    if crop:
+        return crop_panorama(panorama, masks), info
+    else:
+        return panorama, info
 
 
 # ----------------------------------------------------------------------
@@ -272,6 +279,8 @@ if __name__ == "__main__":
     parser.add_argument("--ransac-iterations", type=int, default=1000)
     parser.add_argument("--ransac-threshold", type=float, default=3.0)
     parser.add_argument("--quiet", action="store_true", help="Não imprime progresso")
+    parser.add_argument("--corrected", action="store_true", help="Corrige projeção")
+    parser.add_argument("--cropped", action="store_true", help="Recorta panorama")
 
     args = parser.parse_args()
 
@@ -306,6 +315,8 @@ if __name__ == "__main__":
         blending_method=args.blending,
         feather_width=args.feather_width,
         verbose=not args.quiet,
+        corrected= args.corrected,
+        crop= args.cropped,
     )
 
     cv2.imwrite(args.output, panorama)

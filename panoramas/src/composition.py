@@ -10,7 +10,7 @@ Passos principais:
 
 import cv2
 import numpy as np
-
+from src.correction import cylindrical_inverse_map_CORRECTED
 
 def build_global_homographies(order, homographies, reference_position):
     """
@@ -188,7 +188,7 @@ def create_image_mask(map_x, map_y, image_shape):
     )
 
 
-def cylindrical_stitching(images, order, homographies, focal_length, verbose=True):
+def cylindrical_stitching(images, order, homographies, focal_length, verbose=True, corrected=False):
     """
     Cria um panorama cilíndrico a partir de múltiplas imagens.
 
@@ -239,11 +239,18 @@ def cylindrical_stitching(images, order, homographies, focal_length, verbose=Tru
         print(f"[Composition] Referência: imagem {reference_index} (posição {reference_position})")
 
     # Mapeamento canvas → sistema da referência
-    map_x_ref, map_y_ref = cylindrical_inverse_map(
-        canvas_width, canvas_height,
-        theta_min, y_min,
-        focal_length, cx, cy
-    )
+    if corrected:
+        map_x_ref, map_y_ref = cylindrical_inverse_map_CORRECTED(
+            canvas_width, canvas_height,
+            theta_min, y_min,
+            focal_length, cx, cy
+        )
+    else:
+        map_x_ref, map_y_ref = cylindrical_inverse_map(
+                canvas_width, canvas_height,
+                theta_min, y_min,
+                focal_length, cx, cy
+            )
 
     points_ref = np.stack([map_x_ref.ravel(), map_y_ref.ravel()], axis=1)
 
